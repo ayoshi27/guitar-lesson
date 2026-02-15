@@ -116,16 +116,6 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
 })
 
-const questionText = computed(() => {
-  if (!currentInterval.value) return ''
-  if (direction.value === 'note-to-interval') {
-    return `基準音 ${formatFlatFirst(currentBaseNote.value)} から ${formatFlatFirst(
-      currentTargetNote.value,
-    )} までの音程は？`
-  }
-  return `基準音 ${formatFlatFirst(currentBaseNote.value)} から ${currentInterval.value.label} の音は？`
-})
-
 const answerText = computed(() => {
   if (!currentInterval.value) return ''
   if (direction.value === 'note-to-interval') {
@@ -167,7 +157,17 @@ const answerText = computed(() => {
 
     <div class="qa-card">
       <p class="count">Question {{ questionCount || '-' }}</p>
-      <p class="question">{{ started ? questionText : 'Startを押して開始' }}</p>
+      <p class="question" v-if="started && currentInterval">
+        <template v-if="direction === 'note-to-interval'">
+          基準音 <strong>{{ formatFlatFirst(currentBaseNote) }}</strong> から
+          <strong>{{ formatFlatFirst(currentTargetNote) }}</strong> までの音程は？
+        </template>
+        <template v-else>
+          基準音 <strong>{{ formatFlatFirst(currentBaseNote) }}</strong> から
+          <strong>{{ currentInterval.label }}</strong> の音は？
+        </template>
+      </p>
+      <p class="question" v-else>Startを押して開始</p>
       <p class="answer" :class="{ visible: revealed }">
         {{ started && revealed ? answerText : '答えはCheckで表示' }}
       </p>
