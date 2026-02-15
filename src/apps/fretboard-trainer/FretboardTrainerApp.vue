@@ -189,6 +189,15 @@ const isQuestionPosition = (stringNumber: number, fret: number): boolean => {
   return currentQuestion.value.string === stringNumber && currentQuestion.value.fret === fret
 }
 
+const isInQuizRange = (stringNumber: number, fret: number): boolean => {
+  return (
+    stringNumber >= quizRange.value.stringMin &&
+    stringNumber <= quizRange.value.stringMax &&
+    fret >= quizRange.value.fretMin &&
+    fret <= quizRange.value.fretMax
+  )
+}
+
 const questionAnswerText = computed(() => {
   if (!currentQuestion.value) return ''
   const note = noteAtPosition(currentQuestion.value.string, currentQuestion.value.fret)
@@ -273,7 +282,14 @@ const questionAnswerText = computed(() => {
       <div class="fretboard">
         <div class="header-row">
           <div class="string-header">弦\F</div>
-          <div v-for="fret in frets" :key="`head-${fret}`" class="fret-header">{{ fret }}</div>
+          <div
+            v-for="fret in frets"
+            :key="`head-${fret}`"
+            class="fret-header"
+            :class="{ nut: fret === 0 }"
+          >
+            {{ fret }}
+          </div>
         </div>
 
         <div v-for="stringDef in STRING_DEFS" :key="`string-${stringDef.string}`" class="string-row">
@@ -285,14 +301,28 @@ const questionAnswerText = computed(() => {
             :class="{
               root: isRootPosition(stringDef.string, fret),
               target: isQuestionPosition(stringDef.string, fret),
-              inRange:
-                stringDef.string >= quizRange.stringMin &&
-                stringDef.string <= quizRange.stringMax &&
-                fret >= quizRange.fretMin &&
-                fret <= quizRange.fretMax,
+              nut: fret === 0,
+              inRange: isInQuizRange(stringDef.string, fret),
             }"
           >
-            <span>{{ quizLabelVisible ? labelAtPosition(stringDef.string, fret) : '' }}</span>
+            <span>{{
+              quizLabelVisible && isInQuizRange(stringDef.string, fret)
+                ? labelAtPosition(stringDef.string, fret)
+                : ''
+            }}</span>
+          </div>
+        </div>
+
+        <div class="inlay-row">
+          <div class="inlay-label">Inlay</div>
+          <div v-for="fret in frets" :key="`inlay-${fret}`" class="inlay-cell" :class="{ nut: fret === 0 }">
+            <template v-if="[3, 5, 7, 9, 15, 17, 19, 21].includes(fret)">
+              <span class="inlay-dot" />
+            </template>
+            <template v-else-if="fret === 12 || fret === 24">
+              <span class="inlay-dot dual top" />
+              <span class="inlay-dot dual bottom" />
+            </template>
           </div>
         </div>
       </div>
@@ -402,9 +432,15 @@ button:disabled {
 
 .fretboard-wrap {
   overflow-x: auto;
-  border: 1px solid #d9c389;
+  border: 1px solid #b89959;
   border-radius: 12px;
-  background: #fff;
+  background:
+    linear-gradient(180deg, rgba(255, 245, 218, 0.95), rgba(242, 217, 164, 0.95)),
+    repeating-linear-gradient(
+      90deg,
+      rgba(121, 83, 35, 0.09) 0 12px,
+      rgba(121, 83, 35, 0.03) 12px 24px
+    );
 }
 
 .fretboard {
@@ -414,6 +450,7 @@ button:disabled {
 }
 
 .header-row,
+.inlay-row,
 .string-row {
   display: grid;
   grid-template-columns: 60px repeat(25, 72px);
@@ -422,7 +459,8 @@ button:disabled {
 
 .fret-header,
 .string-header,
-.string-label {
+.string-label,
+.inlay-label {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -437,10 +475,59 @@ button:disabled {
   height: 52px;
 }
 
+.inlay-label {
+  height: 22px;
+  font-size: 0.65rem;
+  background: #e8d0a0;
+}
+
+.fret-header.nut,
+.inlay-cell.nut,
+.note-cell.nut {
+  border-right: 3px solid #5c4520;
+}
+
+.inlay-cell {
+  height: 22px;
+  border: 1px solid #e6cf9f;
+  background: rgba(255, 249, 235, 0.7);
+  position: relative;
+}
+
+.inlay-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #6d5328;
+  opacity: 0.72;
+}
+
+.inlay-dot.dual {
+  left: 50%;
+}
+
+.inlay-dot.top {
+  top: 31%;
+}
+
+.inlay-dot.bottom {
+  top: 69%;
+}
+
 .note-cell {
   height: 52px;
   border: 1px solid #ecd9ac;
-  background: #fffdf8;
+  background:
+    linear-gradient(180deg, rgba(255, 250, 238, 0.9), rgba(248, 233, 197, 0.92)),
+    repeating-linear-gradient(
+      90deg,
+      rgba(107, 74, 31, 0.06) 0 14px,
+      rgba(107, 74, 31, 0.02) 14px 28px
+    );
   display: flex;
   align-items: center;
   justify-content: center;
@@ -450,9 +537,12 @@ button:disabled {
   padding: 0.15rem;
   box-sizing: border-box;
   overflow: hidden;
+  position: relative;
 }
 
 .note-cell span {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   line-height: 1.15;
@@ -461,7 +551,13 @@ button:disabled {
 }
 
 .note-cell.inRange {
-  background: #fffaec;
+  background:
+    linear-gradient(180deg, rgba(255, 247, 221, 0.95), rgba(248, 231, 183, 0.95)),
+    repeating-linear-gradient(
+      90deg,
+      rgba(113, 77, 33, 0.07) 0 14px,
+      rgba(113, 77, 33, 0.03) 14px 28px
+    );
 }
 
 .note-cell.root {
