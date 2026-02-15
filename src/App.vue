@@ -17,7 +17,7 @@ const showBackLink = computed(() => route.path !== '/')
 
 <style scoped>
 .app-shell {
-  width: min(900px, 100%);
+  width: min(1280px, 100%);
 }
 
 .top-nav {
