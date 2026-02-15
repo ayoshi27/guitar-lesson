@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 type DisplayMode = 'note' | 'interval' | 'both'
+type ScaleId = 'none' | 'major' | 'natural-minor' | 'major-pentatonic' | 'minor-pentatonic'
 
 type StringDef = {
   string: number
@@ -38,6 +39,14 @@ const INTERVAL_LABELS: Record<number, string> = {
   11: 'M7',
 }
 
+const SCALE_OPTIONS: Array<{ id: ScaleId; label: string; intervals: number[] }> = [
+  { id: 'none', label: 'なし', intervals: [] },
+  { id: 'major', label: 'メジャースケール', intervals: [0, 2, 4, 5, 7, 9, 11] },
+  { id: 'natural-minor', label: 'ナチュラルマイナー', intervals: [0, 2, 3, 5, 7, 8, 10] },
+  { id: 'major-pentatonic', label: 'メジャーペンタトニック', intervals: [0, 2, 4, 7, 9] },
+  { id: 'minor-pentatonic', label: 'マイナーペンタトニック', intervals: [0, 3, 5, 7, 10] },
+]
+
 const FLAT_FIRST_MAP: Record<string, string> = {
   'C#': 'D♭',
   'D#': 'E♭',
@@ -48,6 +57,7 @@ const FLAT_FIRST_MAP: Record<string, string> = {
 
 const rootNote = ref('C')
 const displayMode = ref<DisplayMode>('interval')
+const selectedScale = ref<ScaleId>('none')
 
 const quizStarted = ref(false)
 const revealed = ref(false)
@@ -198,6 +208,18 @@ const isInQuizRange = (stringNumber: number, fret: number): boolean => {
   )
 }
 
+const selectedScaleIntervals = computed(() => {
+  return SCALE_OPTIONS.find((scale) => scale.id === selectedScale.value)?.intervals ?? []
+})
+
+const isScalePosition = (stringNumber: number, fret: number): boolean => {
+  if (selectedScale.value === 'none') return false
+  if (!isInQuizRange(stringNumber, fret)) return false
+  const note = noteAtPosition(stringNumber, fret)
+  const interval = intervalFromRoot(note)
+  return selectedScaleIntervals.value.includes(interval)
+}
+
 const questionAnswerText = computed(() => {
   if (!currentQuestion.value) return ''
   const note = noteAtPosition(currentQuestion.value.string, currentQuestion.value.fret)
@@ -225,6 +247,13 @@ const questionAnswerText = computed(() => {
           <option value="interval">音程（R, m2, M2...）</option>
           <option value="note">音名（C, C#, ...）</option>
           <option value="both">音名 + 音程</option>
+        </select>
+      </label>
+
+      <label>
+        スケールハイライト
+        <select v-model="selectedScale">
+          <option v-for="scale in SCALE_OPTIONS" :key="scale.id" :value="scale.id">{{ scale.label }}</option>
         </select>
       </label>
     </div>
@@ -301,6 +330,10 @@ const questionAnswerText = computed(() => {
             :class="{
               root: isRootPosition(stringDef.string, fret),
               target: isQuestionPosition(stringDef.string, fret),
+              scaleTone:
+                isScalePosition(stringDef.string, fret) &&
+                !isRootPosition(stringDef.string, fret) &&
+                !isQuestionPosition(stringDef.string, fret),
               nut: fret === 0,
               inRange: isInQuizRange(stringDef.string, fret),
             }"
@@ -570,6 +603,10 @@ button:disabled {
   background: #b8f0da;
   border-color: #299f6f;
   font-weight: 800;
+}
+
+.note-cell.scaleTone {
+  box-shadow: inset 0 0 0 2px rgba(64, 112, 199, 0.65);
 }
 
 @media (max-width: 700px) {
