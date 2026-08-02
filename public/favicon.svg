@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bgHighlight1" cx="22%" cy="18%" r="42%">
+      <stop offset="0%" stop-color="#ffe9ad"/>
+      <stop offset="100%" stop-color="#ffe9ad" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bgHighlight2" cx="86%" cy="82%" r="46%">
+      <stop offset="0%" stop-color="#ffcf6e"/>
+      <stop offset="100%" stop-color="#ffcf6e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bgBase" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffefc8"/>
+      <stop offset="100%" stop-color="#ffd57a"/>
+    </linearGradient>
+    <linearGradient id="neck" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6b4423"/>
+      <stop offset="100%" stop-color="#432810"/>
+    </linearGradient>
+    <radialGradient id="noteDot" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#ffd889"/>
+      <stop offset="60%" stop-color="#f5b029"/>
+      <stop offset="100%" stop-color="#d68f14"/>
+    </radialGradient>
+  </defs>
+
+  <!-- background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgBase)"/>
+  <rect width="512" height="512" rx="112" fill="url(#bgHighlight1)"/>
+  <rect width="512" height="512" rx="112" fill="url(#bgHighlight2)"/>
+
+  <!-- fretboard neck -->
+  <g>
+    <rect x="146" y="70" width="220" height="372" rx="26" fill="url(#neck)"/>
+    <rect x="146" y="70" width="220" height="372" rx="26" fill="none" stroke="#2d1a08" stroke-width="6" opacity="0.5"/>
+
+    <!-- nut -->
+    <rect x="146" y="70" width="220" height="20" rx="8" fill="#f4e6c9"/>
+
+    <!-- frets -->
+    <g stroke="#e9d9b6" stroke-width="6" opacity="0.85">
+      <line x1="146" y1="158" x2="366" y2="158"/>
+      <line x1="146" y1="246" x2="366" y2="246"/>
+      <line x1="146" y1="334" x2="366" y2="334"/>
+      <line x1="146" y1="422" x2="366" y2="422"/>
+    </g>
+
+    <!-- inlay markers -->
+    <circle cx="256" cy="202" r="9" fill="#f4e6c9" opacity="0.55"/>
+    <circle cx="256" cy="378" r="9" fill="#f4e6c9" opacity="0.55"/>
+
+    <!-- strings -->
+    <g stroke="#f4e6c9" stroke-width="5" opacity="0.9">
+      <line x1="172" y1="70" x2="172" y2="442"/>
+      <line x1="211" y1="70" x2="211" y2="442"/>
+      <line x1="250" y1="70" x2="250" y2="442"/>
+      <line x1="289" y1="70" x2="289" y2="442"/>
+      <line x1="328" y1="70" x2="328" y2="442"/>
+    </g>
+  </g>
+
+  <!-- highlighted note -->
+  <circle cx="289" cy="290" r="30" fill="url(#noteDot)" stroke="#2d230d" stroke-width="7"/>
+</svg>
