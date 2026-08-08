@@ -98,12 +98,15 @@ const intervalFromRoot = (note: string): number => {
   return (noteIdx - rootIdx + 12) % 12
 }
 
-const labelAtPosition = (stringNumber: number, fret: number): string => {
+const noteLabelAtPosition = (stringNumber: number, fret: number): string => {
+  const note = noteAtPosition(stringNumber, fret)
+  return formatFlatFirst(note)
+}
+
+const intervalLabelAtPosition = (stringNumber: number, fret: number): string => {
   const note = noteAtPosition(stringNumber, fret)
   const interval = intervalFromRoot(note)
-  if (displayMode.value === 'note') return formatFlatFirst(note)
-  if (displayMode.value === 'interval') return INTERVAL_LABELS[interval] ?? ''
-  return `${formatFlatFirst(note)}\n${INTERVAL_LABELS[interval] ?? ''}`
+  return INTERVAL_LABELS[interval] ?? ''
 }
 
 const quizLabelVisible = computed(() => !quizStarted.value || revealed.value)
@@ -338,11 +341,14 @@ const questionAnswerText = computed(() => {
               inRange: isInQuizRange(stringDef.string, fret),
             }"
           >
-            <span>{{
-              quizLabelVisible && isInQuizRange(stringDef.string, fret)
-                ? labelAtPosition(stringDef.string, fret)
-                : ''
-            }}</span>
+            <template v-if="quizLabelVisible && isInQuizRange(stringDef.string, fret)">
+              <span v-if="displayMode !== 'interval'" class="label-note">{{
+                noteLabelAtPosition(stringDef.string, fret)
+              }}</span>
+              <span v-if="displayMode !== 'note'" class="label-interval">{{
+                intervalLabelAtPosition(stringDef.string, fret)
+              }}</span>
+            </template>
           </div>
         </div>
 
@@ -573,6 +579,11 @@ button:disabled {
   position: relative;
 }
 
+.note-cell {
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
 .note-cell span {
   position: relative;
   z-index: 1;
@@ -581,6 +592,18 @@ button:disabled {
   line-height: 1.15;
   white-space: pre-line;
   overflow-wrap: anywhere;
+}
+
+.label-note {
+  font-weight: 800;
+  color: #3f300f;
+}
+
+.label-interval {
+  font-size: 0.85em;
+  font-weight: 500;
+  font-style: italic;
+  color: #7a5f2e;
 }
 
 .note-cell.inRange {
