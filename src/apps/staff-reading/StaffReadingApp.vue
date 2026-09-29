@@ -68,6 +68,7 @@ const LEDGER_RANGE_OPTIONS = [
 const selectedClefId = ref(CLEFS[0]!.id)
 const selectedKeyId = ref('C')
 const extraLedger = ref(1)
+const excludeMiddleOctave = ref(false)
 
 const started = ref(false)
 const revealed = ref(false)
@@ -147,6 +148,20 @@ const questionRange = computed(() => {
   return { min: clef.bottomLineN - 2 * extra, max: clef.bottomLineN + 8 + 2 * extra }
 })
 
+// C4(n=0)〜C5(n=7)は小学校で習う基礎範囲なので、除外モード時はここを出題対象から外す
+const MIDDLE_OCTAVE_MIN = 0
+const MIDDLE_OCTAVE_MAX = 7
+
+const candidateNs = computed(() => {
+  const { min, max } = questionRange.value
+  const candidates: number[] = []
+  for (let n = min; n <= max; n += 1) {
+    if (excludeMiddleOctave.value && n >= MIDDLE_OCTAVE_MIN && n <= MIDDLE_OCTAVE_MAX) continue
+    candidates.push(n)
+  }
+  return candidates
+})
+
 const currentLedgerLines = computed(() => {
   if (currentN.value === null) return []
   return ledgerLinesFor(currentN.value, selectedClef.value)
@@ -164,13 +179,10 @@ const stemInfo = computed(() => {
   return { x: NOTE_X + 8.5, y1: currentNoteY.value, y2: currentNoteY.value - stemLength }
 })
 
-const randomInRange = (min: number, max: number): number => {
-  return min + Math.floor(Math.random() * (max - min + 1))
-}
-
 const generateQuestion = (): void => {
-  const { min, max } = questionRange.value
-  currentN.value = randomInRange(min, max)
+  const candidates = candidateNs.value
+  if (candidates.length === 0) return
+  currentN.value = candidates[Math.floor(Math.random() * candidates.length)]!
   revealed.value = false
   questionCount.value += 1
   started.value = true
@@ -255,6 +267,11 @@ const answerText = computed(() => {
             {{ opt.label }}
           </option>
         </select>
+      </label>
+
+      <label class="checkbox-label">
+        <input type="checkbox" v-model="excludeMiddleOctave" />
+        C4〜C5を除外して出題
       </label>
     </div>
 
@@ -372,6 +389,19 @@ select {
   padding: 0.5rem 0.65rem;
   font-size: 1rem;
   background: #fffdf7;
+}
+
+.checkbox-label {
+  grid-template-columns: auto 1fr;
+  grid-auto-flow: column;
+  align-items: center;
+  justify-content: start;
+  gap: 0.5rem;
+}
+
+.checkbox-label input[type='checkbox'] {
+  width: 1.1rem;
+  height: 1.1rem;
 }
 
 .qa-card {
