@@ -1,6 +1,7 @@
 import type { Component } from 'vue'
 import FretboardTrainerApp from './fretboard-trainer/FretboardTrainerApp.vue'
 import IntervalDrillApp from './interval-drill/IntervalDrillApp.vue'
+import MusicSymbolsApp from './music-symbols/MusicSymbolsApp.vue'
 import StaffReadingApp from './staff-reading/StaffReadingApp.vue'
 
 export type TrainingAppDefinition = {
@@ -32,5 +33,12 @@ export const TRAINING_APPS: TrainingAppDefinition[] = [
     description: '五線譜上の音符の位置から音名を読み取る練習',
     path: '/apps/staff-reading',
     component: StaffReadingApp,
+  },
+  {
+    id: 'music-symbols',
+    name: '楽譜記号トレーニング',
+    description: '楽譜で使われる記号とその意味を学習・テストできるトレーニング',
+    path: '/apps/music-symbols',
+    component: MusicSymbolsApp,
   },
 ]
