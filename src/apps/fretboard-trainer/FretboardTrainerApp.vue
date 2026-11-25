@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 type DisplayMode = 'note' | 'interval' | 'both'
 type ScaleId = 'none' | 'major' | 'natural-minor' | 'major-pentatonic' | 'minor-pentatonic'
+
+type PositionStyle = 'rock' | 'berklee'
 
 type StringDef = {
   string: number
@@ -47,6 +49,11 @@ const SCALE_OPTIONS: Array<{ id: ScaleId; label: string; intervals: number[] }> 
   { id: 'minor-pentatonic', label: 'マイナーペンタトニック', intervals: [0, 3, 5, 7, 10] },
 ]
 
+// 6弦開放(E)を0としたときの各弦の開放音の高さ（半音）
+const STRING_OPEN_PITCH: Record<number, number> = { 6: 0, 5: 5, 4: 10, 3: 15, 2: 19, 1: 24 }
+const STRINGS_LOW_TO_HIGH = [6, 5, 4, 3, 2, 1]
+const MAX_FRET = 24
+
 const FLAT_FIRST_MAP: Record<string, string> = {
   'C#': 'D♭',
   'D#': 'E♭',
@@ -58,6 +65,10 @@ const FLAT_FIRST_MAP: Record<string, string> = {
 const rootNote = ref('C')
 const displayMode = ref<DisplayMode>('interval')
 const selectedScale = ref<ScaleId>('none')
+const positionStyle = ref<PositionStyle>('rock')
+const selectedPosition = ref(0) // 0 = 全体
+const chordDegree = ref(0) // 0 = なし、1〜7 = スケールの度数
+const chordSize = ref<3 | 4>(3)
 
 const quizStarted = ref(false)
 const revealed = ref(false)
@@ -215,12 +226,165 @@ const selectedScaleIntervals = computed(() => {
   return SCALE_OPTIONS.find((scale) => scale.id === selectedScale.value)?.intervals ?? []
 })
 
+const isPentatonic = computed(() => selectedScaleIntervals.value.length === 5)
+
+const positionOptions = computed(() => {
+  return selectedScaleIntervals.value.map((interval, index) => ({
+    value: index + 1,
+    label: `ポジション${index + 1}（6弦 ${INTERVAL_LABELS[interval]} 始まり）`,
+  }))
+})
+
+watch(selectedScale, () => {
+  if (selectedPosition.value > positionOptions.value.length) selectedPosition.value = 0
+})
+
+const isScaleTone = (stringNumber: number, fret: number): boolean => {
+  const interval = intervalFromRoot(noteAtPosition(stringNumber, fret))
+  return selectedScaleIntervals.value.includes(interval)
+}
+
+// 6弦の何フレットからポジションを始めるか（0〜11）
+const startFretOnLowE = (degreeIndex: number): number => {
+  const interval = selectedScaleIntervals.value[degreeIndex] ?? 0
+  return (noteIndex(rootNote.value) + interval - noteIndex('E') + 24) % 12
+}
+
+// 1弦あたり notesPerString 個ずつ、スケール音を低い方から順に並べる
+// （ロック式=3NPS、ペンタトニックは2音ずつ＝定番の5ボックス）
+const buildNotesPerStringShape = (startFret: number, notesPerString: number): Position[] => {
+  const rootPitch = noteIndex(rootNote.value) - noteIndex('E')
+  const isScalePitch = (pitch: number): boolean =>
+    selectedScaleIntervals.value.includes((((pitch - rootPitch) % 12) + 12) % 12)
+
+  const cells: Position[] = []
+  let pitch = startFret // 6弦開放からの半音数
+  for (const string of STRINGS_LOW_TO_HIGH) {
+    for (let i = 0; i < notesPerString; i += 1) {
+      cells.push({ string, fret: pitch - (STRING_OPEN_PITCH[string] ?? 0) })
+      do {
+        pitch += 1
+      } while (!isScalePitch(pitch))
+    }
+  }
+  return cells
+}
+
+// バークリー式: 人差し指をstartFretに置き、startFret〜+3を基本範囲、+4を小指ストレッチとする。
+// 同じ高さの音が2本の弦にまたがるときは低い方の弦で取る（3弦→2弦の境目も3弦側）ため、
+// 2音になる弦は常に2弦になる。1弦と6弦は同じ形になる。
+const buildBerkleeShape = (startFret: number): Position[] => {
+  const cells: Position[] = []
+  const usedPitches = new Set<number>()
+  for (const string of STRINGS_LOW_TO_HIGH) {
+    const openPitch = STRING_OPEN_PITCH[string] ?? 0
+    for (let fret = startFret; fret <= startFret + 4; fret += 1) {
+      const pitch = openPitch + fret
+      if (usedPitches.has(pitch) || !isScaleTone(string, fret)) continue
+      usedPitches.add(pitch)
+      cells.push({ string, fret })
+    }
+  }
+  return cells
+}
+
+const positionCells = computed(() => {
+  const map = new Map<string, Position>()
+  if (selectedScale.value === 'none' || selectedPosition.value === 0) return map
+  const baseFret = startFretOnLowE(selectedPosition.value - 1)
+  // 12フレットごとに同じ形を繰り返し、指板からはみ出す部分は切り捨てる
+  for (let shift = -12; shift <= MAX_FRET; shift += 12) {
+    const startFret = baseFret + shift
+    const shape = isPentatonic.value
+      ? buildNotesPerStringShape(startFret, 2)
+      : positionStyle.value === 'rock'
+        ? buildNotesPerStringShape(startFret, 3)
+        : buildBerkleeShape(startFret)
+    for (const cell of shape) {
+      if (cell.fret < 0 || cell.fret > MAX_FRET) continue
+      map.set(`${cell.string}-${cell.fret}`, cell)
+    }
+  }
+  return map
+})
+
+const isPositionMode = computed(() => selectedScale.value !== 'none' && selectedPosition.value !== 0)
+
+const positionCellAt = (stringNumber: number, fret: number): Position | undefined => {
+  if (!isInQuizRange(stringNumber, fret)) return undefined
+  return positionCells.value.get(`${stringNumber}-${fret}`)
+}
+
+const ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII']
+
+// [3度, 5度] または [3度, 5度, 7度] の半音数 → コードの種類
+const CHORD_QUALITIES: Record<string, string> = {
+  '4,7': '',
+  '3,7': 'm',
+  '3,6': 'm(♭5)',
+  '4,8': 'aug',
+  '4,7,11': 'M7',
+  '4,7,10': '7',
+  '3,7,10': 'm7',
+  '3,6,10': 'm7(♭5)',
+  '3,6,9': 'dim7',
+  '3,7,11': 'mM7',
+  '4,8,11': 'augM7',
+}
+
+const isChordAvailable = computed(() => selectedScaleIntervals.value.length === 7)
+
+// スケールの度数の上に3度ずつ積んだダイアトニックコード（ルートからの音程のリスト）
+const diatonicChordIntervals = (degreeIndex: number, size: number): number[] => {
+  const intervals = selectedScaleIntervals.value
+  return Array.from({ length: size }, (_, i) => intervals[(degreeIndex + i * 2) % intervals.length] ?? 0)
+}
+
+const chordOptions = computed(() => {
+  if (!isChordAvailable.value) return []
+  return selectedScaleIntervals.value.map((rootInterval, index) => {
+    const tones = diatonicChordIntervals(index, chordSize.value)
+    const shape = tones
+      .slice(1)
+      .map((tone) => (tone - rootInterval + 12) % 12)
+      .join(',')
+    const quality = CHORD_QUALITIES[shape] ?? '?'
+    const rootName = NOTES[(noteIndex(rootNote.value) + rootInterval) % 12] ?? 'C'
+    const chordName = `${FLAT_FIRST_MAP[rootName] ?? rootName}${quality}`
+    return { value: index + 1, label: `${ROMAN_NUMERALS[index]}${quality}（${chordName}）` }
+  })
+})
+
+watch(selectedScale, () => {
+  if (!isChordAvailable.value) chordDegree.value = 0
+})
+
+const chordToneIntervals = computed(() => {
+  if (!isChordAvailable.value || chordDegree.value === 0) return []
+  return diatonicChordIntervals(chordDegree.value - 1, chordSize.value)
+})
+
+const isChordMode = computed(() => chordToneIntervals.value.length > 0)
+
 const isScalePosition = (stringNumber: number, fret: number): boolean => {
   if (selectedScale.value === 'none') return false
+  if (isPositionMode.value) return false
   if (!isInQuizRange(stringNumber, fret)) return false
-  const note = noteAtPosition(stringNumber, fret)
-  const interval = intervalFromRoot(note)
-  return selectedScaleIntervals.value.includes(interval)
+  return isScaleTone(stringNumber, fret)
+}
+
+// スケールがハイライトされているセルのうち、コードトーンにあたるもの
+const isHighlightedScaleCell = (stringNumber: number, fret: number): boolean => {
+  return isPositionMode.value ? !!positionCellAt(stringNumber, fret) : isScalePosition(stringNumber, fret)
+}
+
+const chordToneKind = (stringNumber: number, fret: number): 'root' | 'tone' | null => {
+  if (!isChordMode.value || isQuestionPosition(stringNumber, fret)) return null
+  if (!isHighlightedScaleCell(stringNumber, fret)) return null
+  const interval = intervalFromRoot(noteAtPosition(stringNumber, fret))
+  const index = chordToneIntervals.value.indexOf(interval)
+  if (index < 0) return null
+  return index === 0 ? 'root' : 'tone'
 }
 
 const questionAnswerText = computed(() => {
@@ -236,56 +400,132 @@ const questionAnswerText = computed(() => {
     <h1>ギター指板トレーニング</h1>
     <p class="sub">キーを基準に、指板上の音名と音程を覚える練習</p>
 
-    <div class="controls">
-      <label>
-        キー（ルート）
-        <select v-model="rootNote">
-          <option v-for="note in NOTES" :key="note" :value="note">{{ formatFlatFirst(note) }}</option>
-        </select>
-      </label>
+    <div class="settings">
+      <fieldset class="setting-group">
+        <legend>表示</legend>
+        <label>
+          キー（ルート）
+          <select v-model="rootNote">
+            <option v-for="note in NOTES" :key="note" :value="note">{{ formatFlatFirst(note) }}</option>
+          </select>
+        </label>
+        <label>
+          表示内容
+          <select v-model="displayMode">
+            <option value="interval">音程（R, m2, M2...）</option>
+            <option value="note">音名（C, C#, ...）</option>
+            <option value="both">音名 + 音程</option>
+          </select>
+        </label>
+      </fieldset>
 
-      <label>
-        表示内容
-        <select v-model="displayMode">
-          <option value="interval">音程（R, m2, M2...）</option>
-          <option value="note">音名（C, C#, ...）</option>
-          <option value="both">音名 + 音程</option>
-        </select>
-      </label>
+      <fieldset class="setting-group">
+        <legend>スケール</legend>
+        <label>
+          スケールハイライト
+          <select v-model="selectedScale">
+            <option v-for="scale in SCALE_OPTIONS" :key="scale.id" :value="scale.id">{{ scale.label }}</option>
+          </select>
+        </label>
+        <label v-if="selectedScale !== 'none'">
+          ポジション
+          <select v-model.number="selectedPosition">
+            <option :value="0">全体</option>
+            <option v-for="option in positionOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <div v-if="isPositionMode && !isPentatonic" class="field">
+          <span class="field-label">方式</span>
+          <div class="segmented" role="radiogroup" aria-label="ポジションの方式">
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="positionStyle === 'rock'"
+              :class="{ active: positionStyle === 'rock' }"
+              @click="positionStyle = 'rock'"
+            >
+              ロック式（3NPS）
+            </button>
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="positionStyle === 'berklee'"
+              :class="{ active: positionStyle === 'berklee' }"
+              @click="positionStyle = 'berklee'"
+            >
+              バークリー式
+            </button>
+          </div>
+        </div>
+        <div v-if="isChordAvailable" class="field">
+          <span class="field-label">コードトーン</span>
+          <div class="chord-row">
+            <select v-model.number="chordDegree" aria-label="コードトーン">
+              <option :value="0">なし</option>
+              <option v-for="option in chordOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+            <div class="segmented compact" role="radiogroup" aria-label="和音の数">
+              <button
+                type="button"
+                role="radio"
+                :aria-checked="chordSize === 3"
+                :class="{ active: chordSize === 3 }"
+                @click="chordSize = 3"
+              >
+                3和音
+              </button>
+              <button
+                type="button"
+                role="radio"
+                :aria-checked="chordSize === 4"
+                :class="{ active: chordSize === 4 }"
+                @click="chordSize = 4"
+              >
+                4和音
+              </button>
+            </div>
+          </div>
+        </div>
+        <p v-if="isChordMode" class="group-help">
+          <span class="legend-swatch chord-root-swatch" />コードのルート
+          <span class="legend-swatch chord-tone-swatch" />コードトーン
+        </p>
+        <p v-if="isPositionMode" class="group-help">
+          <template v-if="isPentatonic">1弦2音の5ボックスで表示します。</template>
+          <template v-else-if="positionStyle === 'rock'">1弦に3音ずつ。1弦と6弦の形はずれます。</template>
+          <template v-else>4フレット幅＋小指ストレッチ。2弦だけ2音で、1弦と6弦は同じ形。</template>
+        </p>
+      </fieldset>
 
-      <label>
-        スケールハイライト
-        <select v-model="selectedScale">
-          <option v-for="scale in SCALE_OPTIONS" :key="scale.id" :value="scale.id">{{ scale.label }}</option>
-        </select>
-      </label>
+      <fieldset class="setting-group">
+        <legend>クイズ出題範囲</legend>
+        <div class="field">
+          <span class="field-label">フレット</span>
+          <div class="range-pair">
+            <input v-model.number="fretStart" type="number" min="0" max="24" aria-label="フレット開始" />
+            <span>〜</span>
+            <input v-model.number="fretEnd" type="number" min="0" max="24" aria-label="フレット終了" />
+          </div>
+        </div>
+        <div class="field">
+          <span class="field-label">弦（1-6）</span>
+          <div class="range-pair">
+            <input v-model.number="stringStart" type="number" min="1" max="6" aria-label="弦開始" />
+            <span>〜</span>
+            <input v-model.number="stringEnd" type="number" min="1" max="6" aria-label="弦終了" />
+          </div>
+        </div>
+        <p class="group-help">
+          現在: {{ quizRange.stringMin }}弦〜{{ quizRange.stringMax }}弦 / {{ quizRange.fretMin }}F〜{{
+            quizRange.fretMax
+          }}F
+        </p>
+      </fieldset>
     </div>
-
-    <fieldset class="range-box">
-      <legend>クイズ出題範囲</legend>
-      <div class="range-grid">
-        <label>
-          フレット開始
-          <input v-model.number="fretStart" type="number" min="0" max="24" />
-        </label>
-        <label>
-          フレット終了
-          <input v-model.number="fretEnd" type="number" min="0" max="24" />
-        </label>
-        <label>
-          弦開始（1-6）
-          <input v-model.number="stringStart" type="number" min="1" max="6" />
-        </label>
-        <label>
-          弦終了（1-6）
-          <input v-model.number="stringEnd" type="number" min="1" max="6" />
-        </label>
-      </div>
-      <p class="range-help">
-        現在の範囲: {{ quizRange.stringMin }}弦〜{{ quizRange.stringMax }}弦 /
-        {{ quizRange.fretMin }}F〜{{ quizRange.fretMax }}F
-      </p>
-    </fieldset>
 
     <div class="actions">
       <button class="primary" @click="startQuiz">Start</button>
@@ -337,6 +577,10 @@ const questionAnswerText = computed(() => {
                 isScalePosition(stringDef.string, fret) &&
                 !isRootPosition(stringDef.string, fret) &&
                 !isQuestionPosition(stringDef.string, fret),
+              chordRoot: chordToneKind(stringDef.string, fret) === 'root',
+              chordTone: chordToneKind(stringDef.string, fret) === 'tone',
+              positionTone:
+                !!positionCellAt(stringDef.string, fret) && !isQuestionPosition(stringDef.string, fret),
               nut: fret === 0,
               inRange: isInQuizRange(stringDef.string, fret),
             }"
@@ -389,10 +633,122 @@ h1 {
   color: #6a5630;
 }
 
-.controls {
+.settings {
   display: grid;
-  gap: 0.7rem;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  align-items: start;
+}
+
+.setting-group {
+  margin: 0;
+  border: 1px solid #d8be86;
+  border-radius: 12px;
+  padding: 0.6rem 0.75rem 0.75rem;
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.setting-group legend {
+  padding: 0 0.4rem;
+  font-weight: 700;
+  color: #493914;
+}
+
+.field {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.field-label {
+  font-weight: 600;
+  color: #493914;
+}
+
+.range-pair {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.4rem;
+  color: #6b572e;
+}
+
+.range-pair input {
+  min-width: 0;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid #b9a064;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.segmented button {
+  border: none;
+  border-radius: 0;
+  min-height: 38px;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.88rem;
+  background: #fffdf7;
+}
+
+.segmented button + button {
+  border-left: 1px solid #b9a064;
+}
+
+.segmented button.active {
+  background: #f5b029;
+  color: #2c1d00;
+}
+
+.chord-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.chord-row select {
+  min-width: 0;
+}
+
+.segmented.compact button {
+  min-height: 36px;
+  padding: 0.35rem 0.6rem;
+  white-space: nowrap;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin: 0 0.3em 0 0.2em;
+  border-radius: 3px;
+  vertical-align: -0.1em;
+}
+
+.legend-swatch:not(:first-child) {
+  margin-left: 0.8em;
+}
+
+.chord-root-swatch {
+  background: #f59a7c;
+  border: 1px solid #c4582f;
+}
+
+.chord-tone-swatch {
+  background: #ffd3c4;
+  border: 1px solid #e0896c;
+}
+
+.group-help {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #6b572e;
 }
 
 label {
@@ -409,30 +765,6 @@ input {
   padding: 0.5rem 0.65rem;
   font-size: 0.95rem;
   background: #fffdf7;
-}
-
-.range-box {
-  margin: 0.9rem 0 0;
-  border: 1px solid #d8be86;
-  border-radius: 12px;
-  padding: 0.7rem;
-}
-
-.range-box legend {
-  padding: 0 0.4rem;
-  font-weight: 700;
-}
-
-.range-grid {
-  display: grid;
-  gap: 0.6rem;
-  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
-}
-
-.range-help {
-  margin: 0.65rem 0 0;
-  font-size: 0.9rem;
-  color: #6b572e;
 }
 
 .actions {
@@ -622,6 +954,17 @@ button:disabled {
   font-weight: 700;
 }
 
+.note-cell.chordTone {
+  background: #ffd3c4;
+  border-color: #e0896c;
+}
+
+.note-cell.chordRoot {
+  background: #f59a7c;
+  border-color: #c4582f;
+  font-weight: 800;
+}
+
 .note-cell.target {
   background: #b8f0da;
   border-color: #299f6f;
@@ -632,14 +975,15 @@ button:disabled {
   box-shadow: inset 0 0 0 2px rgba(64, 112, 199, 0.65);
 }
 
+
+.note-cell.positionTone {
+  box-shadow: inset 0 0 0 3px rgba(64, 112, 199, 0.8);
+}
+
 @media (max-width: 700px) {
   .panel {
     border-radius: 16px;
     padding: 0.85rem;
-  }
-
-  .range-grid {
-    grid-template-columns: 1fr 1fr;
   }
 
   .actions {
