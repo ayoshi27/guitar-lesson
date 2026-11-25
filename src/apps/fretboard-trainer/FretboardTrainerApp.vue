@@ -67,6 +67,8 @@ const displayMode = ref<DisplayMode>('interval')
 const selectedScale = ref<ScaleId>('none')
 const positionStyle = ref<PositionStyle>('rock')
 const selectedPosition = ref(0) // 0 = 全体
+const chordDegree = ref(0) // 0 = なし、1〜7 = スケールの度数
+const chordSize = ref<3 | 4>(3)
 
 const quizStarted = ref(false)
 const revealed = ref(false)
@@ -313,11 +315,76 @@ const positionCellAt = (stringNumber: number, fret: number): Position | undefine
   return positionCells.value.get(`${stringNumber}-${fret}`)
 }
 
+const ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII']
+
+// [3度, 5度] または [3度, 5度, 7度] の半音数 → コードの種類
+const CHORD_QUALITIES: Record<string, string> = {
+  '4,7': '',
+  '3,7': 'm',
+  '3,6': 'm(♭5)',
+  '4,8': 'aug',
+  '4,7,11': 'M7',
+  '4,7,10': '7',
+  '3,7,10': 'm7',
+  '3,6,10': 'm7(♭5)',
+  '3,6,9': 'dim7',
+  '3,7,11': 'mM7',
+  '4,8,11': 'augM7',
+}
+
+const isChordAvailable = computed(() => selectedScaleIntervals.value.length === 7)
+
+// スケールの度数の上に3度ずつ積んだダイアトニックコード（ルートからの音程のリスト）
+const diatonicChordIntervals = (degreeIndex: number, size: number): number[] => {
+  const intervals = selectedScaleIntervals.value
+  return Array.from({ length: size }, (_, i) => intervals[(degreeIndex + i * 2) % intervals.length] ?? 0)
+}
+
+const chordOptions = computed(() => {
+  if (!isChordAvailable.value) return []
+  return selectedScaleIntervals.value.map((rootInterval, index) => {
+    const tones = diatonicChordIntervals(index, chordSize.value)
+    const shape = tones
+      .slice(1)
+      .map((tone) => (tone - rootInterval + 12) % 12)
+      .join(',')
+    const quality = CHORD_QUALITIES[shape] ?? '?'
+    const rootName = NOTES[(noteIndex(rootNote.value) + rootInterval) % 12] ?? 'C'
+    const chordName = `${FLAT_FIRST_MAP[rootName] ?? rootName}${quality}`
+    return { value: index + 1, label: `${ROMAN_NUMERALS[index]}${quality}（${chordName}）` }
+  })
+})
+
+watch(selectedScale, () => {
+  if (!isChordAvailable.value) chordDegree.value = 0
+})
+
+const chordToneIntervals = computed(() => {
+  if (!isChordAvailable.value || chordDegree.value === 0) return []
+  return diatonicChordIntervals(chordDegree.value - 1, chordSize.value)
+})
+
+const isChordMode = computed(() => chordToneIntervals.value.length > 0)
+
 const isScalePosition = (stringNumber: number, fret: number): boolean => {
   if (selectedScale.value === 'none') return false
   if (isPositionMode.value) return false
   if (!isInQuizRange(stringNumber, fret)) return false
   return isScaleTone(stringNumber, fret)
+}
+
+// スケールがハイライトされているセルのうち、コードトーンにあたるもの
+const isHighlightedScaleCell = (stringNumber: number, fret: number): boolean => {
+  return isPositionMode.value ? !!positionCellAt(stringNumber, fret) : isScalePosition(stringNumber, fret)
+}
+
+const chordToneKind = (stringNumber: number, fret: number): 'root' | 'tone' | null => {
+  if (!isChordMode.value || isQuestionPosition(stringNumber, fret)) return null
+  if (!isHighlightedScaleCell(stringNumber, fret)) return null
+  const interval = intervalFromRoot(noteAtPosition(stringNumber, fret))
+  const index = chordToneIntervals.value.indexOf(interval)
+  if (index < 0) return null
+  return index === 0 ? 'root' : 'tone'
 }
 
 const questionAnswerText = computed(() => {
@@ -392,6 +459,41 @@ const questionAnswerText = computed(() => {
             </button>
           </div>
         </div>
+        <div v-if="isChordAvailable" class="field">
+          <span class="field-label">コードトーン</span>
+          <div class="chord-row">
+            <select v-model.number="chordDegree" aria-label="コードトーン">
+              <option :value="0">なし</option>
+              <option v-for="option in chordOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+            <div class="segmented compact" role="radiogroup" aria-label="和音の数">
+              <button
+                type="button"
+                role="radio"
+                :aria-checked="chordSize === 3"
+                :class="{ active: chordSize === 3 }"
+                @click="chordSize = 3"
+              >
+                3和音
+              </button>
+              <button
+                type="button"
+                role="radio"
+                :aria-checked="chordSize === 4"
+                :class="{ active: chordSize === 4 }"
+                @click="chordSize = 4"
+              >
+                4和音
+              </button>
+            </div>
+          </div>
+        </div>
+        <p v-if="isChordMode" class="group-help">
+          <span class="legend-swatch chord-root-swatch" />コードのルート
+          <span class="legend-swatch chord-tone-swatch" />コードトーン
+        </p>
         <p v-if="isPositionMode" class="group-help">
           <template v-if="isPentatonic">1弦2音の5ボックスで表示します。</template>
           <template v-else-if="positionStyle === 'rock'">1弦に3音ずつ。1弦と6弦の形はずれます。</template>
@@ -475,6 +577,8 @@ const questionAnswerText = computed(() => {
                 isScalePosition(stringDef.string, fret) &&
                 !isRootPosition(stringDef.string, fret) &&
                 !isQuestionPosition(stringDef.string, fret),
+              chordRoot: chordToneKind(stringDef.string, fret) === 'root',
+              chordTone: chordToneKind(stringDef.string, fret) === 'tone',
               positionTone:
                 !!positionCellAt(stringDef.string, fret) && !isQuestionPosition(stringDef.string, fret),
               nut: fret === 0,
@@ -598,6 +702,46 @@ h1 {
 .segmented button.active {
   background: #f5b029;
   color: #2c1d00;
+}
+
+.chord-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.chord-row select {
+  min-width: 0;
+}
+
+.segmented.compact button {
+  min-height: 36px;
+  padding: 0.35rem 0.6rem;
+  white-space: nowrap;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin: 0 0.3em 0 0.2em;
+  border-radius: 3px;
+  vertical-align: -0.1em;
+}
+
+.legend-swatch:not(:first-child) {
+  margin-left: 0.8em;
+}
+
+.chord-root-swatch {
+  background: #f59a7c;
+  border: 1px solid #c4582f;
+}
+
+.chord-tone-swatch {
+  background: #ffd3c4;
+  border: 1px solid #e0896c;
 }
 
 .group-help {
@@ -808,6 +952,17 @@ button:disabled {
   background: #ffe4a5;
   border-color: #e3a82a;
   font-weight: 700;
+}
+
+.note-cell.chordTone {
+  background: #ffd3c4;
+  border-color: #e0896c;
+}
+
+.note-cell.chordRoot {
+  background: #f59a7c;
+  border-color: #c4582f;
+  font-weight: 800;
 }
 
 .note-cell.target {
